@@ -1,0 +1,15 @@
+{"time":"2025-11-05T17:52:50.572726+01:00","level":"INFO","msg":"stream: starting","core version":"0.22.3"}
+{"time":"2025-11-05T17:52:50.847619+01:00","level":"INFO","msg":"stream: created new stream","id":"zs87kf6d"}
+{"time":"2025-11-05T17:52:50.847669+01:00","level":"INFO","msg":"handler: started","stream_id":"zs87kf6d"}
+{"time":"2025-11-05T17:52:50.847829+01:00","level":"INFO","msg":"stream: started","id":"zs87kf6d"}
+{"time":"2025-11-05T17:52:50.847838+01:00","level":"INFO","msg":"writer: started","stream_id":"zs87kf6d"}
+{"time":"2025-11-05T17:52:50.847878+01:00","level":"INFO","msg":"sender: started","stream_id":"zs87kf6d"}
+{"time":"2025-11-05T17:52:51.248897+01:00","level":"ERROR","msg":"git repo not found","error":"repository does not exist"}
+{"time":"2025-11-05T17:52:51.453488+01:00","level":"INFO","msg":"stream: closing","id":"zs87kf6d"}
+{"time":"2025-11-05T17:53:01.447045+01:00","level":"WARN","msg":"tensorboard: no root directory","error":"timed out after 10s"}
+{"time":"2025-11-05T17:53:01.448393+01:00","level":"INFO","msg":"tensorboard: tracking new log directory","rootDir":{},"logDir":"LocalOrCloudPath(LocalPath=\"/Users/hyloradotcom/Documents/ERAMSUS/KPISseminar/CACLA2/runs/Pendulum-v1__ppo-run__1__1762361569\")","namespace":""}
+{"time":"2025-11-05T17:53:01.449582+01:00","level":"INFO","msg":"tensorboard: saving file","fileLocation":"/Users/hyloradotcom/Documents/ERAMSUS/KPISseminar/CACLA2/runs/Pendulum-v1__ppo-run__1__1762361569/events.out.tfevents.1762361571.NAT-INSIDE-192-168-215-111.rrz.uni-hamburg.de.local.8837.0","runPath":"runs/Pendulum-v1__ppo-run__1__1762361569/events.out.tfevents.1762361571.NAT-INSIDE-192-168-215-111.rrz.uni-hamburg.de.local.8837.0"}
+{"time":"2025-11-05T17:53:02.408778+01:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-11-05T17:53:02.655492+01:00","level":"INFO","msg":"handler: closed","stream_id":"zs87kf6d"}
+{"time":"2025-11-05T17:53:02.655914+01:00","level":"INFO","msg":"sender: closed","stream_id":"zs87kf6d"}
+{"time":"2025-11-05T17:53:02.655954+01:00","level":"INFO","msg":"stream: closed","id":"zs87kf6d"}

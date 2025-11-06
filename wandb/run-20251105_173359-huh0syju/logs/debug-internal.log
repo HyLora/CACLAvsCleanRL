@@ -1,0 +1,15 @@
+{"time":"2025-11-05T17:34:00.150591+01:00","level":"INFO","msg":"stream: starting","core version":"0.22.3"}
+{"time":"2025-11-05T17:34:00.423065+01:00","level":"INFO","msg":"stream: created new stream","id":"huh0syju"}
+{"time":"2025-11-05T17:34:00.423123+01:00","level":"INFO","msg":"handler: started","stream_id":"huh0syju"}
+{"time":"2025-11-05T17:34:00.423247+01:00","level":"INFO","msg":"stream: started","id":"huh0syju"}
+{"time":"2025-11-05T17:34:00.423262+01:00","level":"INFO","msg":"writer: started","stream_id":"huh0syju"}
+{"time":"2025-11-05T17:34:00.423282+01:00","level":"INFO","msg":"sender: started","stream_id":"huh0syju"}
+{"time":"2025-11-05T17:34:00.822526+01:00","level":"ERROR","msg":"git repo not found","error":"repository does not exist"}
+{"time":"2025-11-05T17:34:01.307527+01:00","level":"INFO","msg":"stream: closing","id":"huh0syju"}
+{"time":"2025-11-05T17:34:10.927435+01:00","level":"WARN","msg":"tensorboard: no root directory","error":"timed out after 10s"}
+{"time":"2025-11-05T17:34:10.92776+01:00","level":"INFO","msg":"tensorboard: tracking new log directory","rootDir":{},"logDir":"LocalOrCloudPath(LocalPath=\"/Users/hyloradotcom/Documents/ERAMSUS/KPISseminar/CACLA2/runs/Pendulum-v1__sac-run__1__1762360439\")","namespace":""}
+{"time":"2025-11-05T17:34:10.928602+01:00","level":"INFO","msg":"tensorboard: saving file","fileLocation":"/Users/hyloradotcom/Documents/ERAMSUS/KPISseminar/CACLA2/runs/Pendulum-v1__sac-run__1__1762360439/events.out.tfevents.1762360440.NAT-INSIDE-192-168-215-111.rrz.uni-hamburg.de.local.6668.0","runPath":"runs/Pendulum-v1__sac-run__1__1762360439/events.out.tfevents.1762360440.NAT-INSIDE-192-168-215-111.rrz.uni-hamburg.de.local.6668.0"}
+{"time":"2025-11-05T17:34:11.879692+01:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-11-05T17:34:12.110328+01:00","level":"INFO","msg":"handler: closed","stream_id":"huh0syju"}
+{"time":"2025-11-05T17:34:12.110486+01:00","level":"INFO","msg":"sender: closed","stream_id":"huh0syju"}
+{"time":"2025-11-05T17:34:12.110505+01:00","level":"INFO","msg":"stream: closed","id":"huh0syju"}

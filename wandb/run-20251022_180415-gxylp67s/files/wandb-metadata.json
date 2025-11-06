@@ -1,0 +1,32 @@
+{
+  "os":  "macOS-15.5-arm64-arm-64bit",
+  "python":  "CPython 3.10.19",
+  "startedAt":  "2025-10-22T16:04:15.288126Z",
+  "program":  "/Users/hyloradotcom/Desktop/KPISseminar/CACLA2/main.py",
+  "codePath":  "main.py",
+  "codePathLocal":  "main.py",
+  "email":  "hyloradotcom@gmail.com",
+  "root":  "/Users/hyloradotcom/Desktop/KPISseminar/CACLA2",
+  "host":  "NAT-INSIDE-192-168-210-70.rrz.uni-hamburg.de.local",
+  "executable":  "/opt/anaconda3/envs/cleanrl_env/bin/python",
+  "cpu_count":  10,
+  "cpu_count_logical":  10,
+  "disk":  {
+    "/":  {
+      "total":  "245107195904",
+      "used":  "60667936768"
+    }
+  },
+  "memory":  {
+    "total":  "17179869184"
+  },
+  "apple":  {
+    "name":  "Apple M4",
+    "ecpuCores":  6,
+    "pcpuCores":  4,
+    "gpuCores":  8,
+    "memoryGb":  16,
+    "ramTotalBytes":  "17179869184"
+  },
+  "writerId":  "ouxc36l0k4u7k3ow8982xslr7e91f800"
+}

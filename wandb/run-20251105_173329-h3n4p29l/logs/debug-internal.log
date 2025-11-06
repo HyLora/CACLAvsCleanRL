@@ -1,0 +1,15 @@
+{"time":"2025-11-05T17:33:29.292631+01:00","level":"INFO","msg":"stream: starting","core version":"0.22.3"}
+{"time":"2025-11-05T17:33:29.551884+01:00","level":"INFO","msg":"stream: created new stream","id":"h3n4p29l"}
+{"time":"2025-11-05T17:33:29.551931+01:00","level":"INFO","msg":"handler: started","stream_id":"h3n4p29l"}
+{"time":"2025-11-05T17:33:29.552075+01:00","level":"INFO","msg":"stream: started","id":"h3n4p29l"}
+{"time":"2025-11-05T17:33:29.552083+01:00","level":"INFO","msg":"sender: started","stream_id":"h3n4p29l"}
+{"time":"2025-11-05T17:33:29.552082+01:00","level":"INFO","msg":"writer: started","stream_id":"h3n4p29l"}
+{"time":"2025-11-05T17:33:29.90244+01:00","level":"ERROR","msg":"git repo not found","error":"repository does not exist"}
+{"time":"2025-11-05T17:33:30.05628+01:00","level":"INFO","msg":"stream: closing","id":"h3n4p29l"}
+{"time":"2025-11-05T17:33:40.051598+01:00","level":"WARN","msg":"tensorboard: no root directory","error":"timed out after 10s"}
+{"time":"2025-11-05T17:33:40.05188+01:00","level":"INFO","msg":"tensorboard: tracking new log directory","rootDir":{},"logDir":"LocalOrCloudPath(LocalPath=\"/Users/hyloradotcom/Documents/ERAMSUS/KPISseminar/CACLA2/runs/Pendulum-v1__ppo-run__1__1762360408\")","namespace":""}
+{"time":"2025-11-05T17:33:40.054817+01:00","level":"INFO","msg":"tensorboard: saving file","fileLocation":"/Users/hyloradotcom/Documents/ERAMSUS/KPISseminar/CACLA2/runs/Pendulum-v1__ppo-run__1__1762360408/events.out.tfevents.1762360410.NAT-INSIDE-192-168-215-111.rrz.uni-hamburg.de.local.6472.0","runPath":"runs/Pendulum-v1__ppo-run__1__1762360408/events.out.tfevents.1762360410.NAT-INSIDE-192-168-215-111.rrz.uni-hamburg.de.local.6472.0"}
+{"time":"2025-11-05T17:33:41.059162+01:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-11-05T17:33:41.468945+01:00","level":"INFO","msg":"handler: closed","stream_id":"h3n4p29l"}
+{"time":"2025-11-05T17:33:41.469343+01:00","level":"INFO","msg":"sender: closed","stream_id":"h3n4p29l"}
+{"time":"2025-11-05T17:33:41.469398+01:00","level":"INFO","msg":"stream: closed","id":"h3n4p29l"}

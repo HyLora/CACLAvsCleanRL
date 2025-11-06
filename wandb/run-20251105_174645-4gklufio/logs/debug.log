@@ -1,0 +1,76 @@
+2025-11-05 17:46:45,723 INFO    MainThread:7916 [wandb_setup.py:_flush():81] Current SDK version is 0.22.3
+2025-11-05 17:46:45,723 INFO    MainThread:7916 [wandb_setup.py:_flush():81] Configure stats pid to 7916
+2025-11-05 17:46:45,723 INFO    MainThread:7916 [wandb_setup.py:_flush():81] Loading settings from /Users/hyloradotcom/.config/wandb/settings
+2025-11-05 17:46:45,723 INFO    MainThread:7916 [wandb_setup.py:_flush():81] Loading settings from /Users/hyloradotcom/Documents/ERAMSUS/KPISseminar/CACLA2/wandb/settings
+2025-11-05 17:46:45,723 INFO    MainThread:7916 [wandb_setup.py:_flush():81] Loading settings from environment variables
+2025-11-05 17:46:45,723 INFO    MainThread:7916 [wandb_init.py:setup_run_log_directory():706] Logging user logs to /Users/hyloradotcom/Documents/ERAMSUS/KPISseminar/CACLA2/wandb/run-20251105_174645-4gklufio/logs/debug.log
+2025-11-05 17:46:45,723 INFO    MainThread:7916 [wandb_init.py:setup_run_log_directory():707] Logging internal logs to /Users/hyloradotcom/Documents/ERAMSUS/KPISseminar/CACLA2/wandb/run-20251105_174645-4gklufio/logs/debug-internal.log
+2025-11-05 17:46:45,728 INFO    MainThread:7916 [wandb_init.py:init():833] calling init triggers
+2025-11-05 17:46:45,728 INFO    MainThread:7916 [wandb_init.py:init():838] wandb.init called with sweep_config: {}
+config: {'exp_name': 'ppo-run', 'seed': 1, 'torch_deterministic': True, 'cuda': True, 'track': True, 'wandb_project_name': 'cacla-vs-cleanrl-benchmark', 'wandb_entity': None, 'capture_video': False, 'env_id': 'Pendulum-v1', 'total_timesteps': 200000, 'learning_rate': 0.0003, 'num_envs': 1, 'num_steps': 2048, 'anneal_lr': True, 'gae': True, 'gamma': 0.99, 'gae_lambda': 0.95, 'num_minibatches': 32, 'update_epochs': 10, 'norm_adv': True, 'clip_coef': 0.2, 'clip_vloss': True, 'ent_coef': 0.0, 'vf_coef': 0.5, 'max_grad_norm': 0.5, 'target_kl': None, 'batch_size': 2048, 'minibatch_size': 64, '_wandb': {'code_path': 'code/ppo_pendulum_cleanrl.py'}}
+2025-11-05 17:46:45,729 INFO    MainThread:7916 [wandb_init.py:init():881] starting backend
+2025-11-05 17:46:45,951 INFO    MainThread:7916 [wandb_init.py:init():884] sending inform_init request
+2025-11-05 17:46:45,972 INFO    MainThread:7916 [wandb_init.py:init():892] backend started and connected
+2025-11-05 17:46:45,973 INFO    MainThread:7916 [wandb_init.py:init():962] updated telemetry
+2025-11-05 17:46:45,973 INFO    MainThread:7916 [wandb_init.py:init():986] communicating run to backend with 90.0 second timeout
+2025-11-05 17:46:46,481 INFO    MainThread:7916 [wandb_init.py:init():1033] starting run threads in backend
+2025-11-05 17:46:46,645 INFO    MainThread:7916 [wandb_run.py:_console_start():2506] atexit reg
+2025-11-05 17:46:46,645 INFO    MainThread:7916 [wandb_run.py:_redirect():2354] redirect: wrap_raw
+2025-11-05 17:46:46,645 INFO    MainThread:7916 [wandb_run.py:_redirect():2423] Wrapping output streams.
+2025-11-05 17:46:46,645 INFO    MainThread:7916 [wandb_run.py:_redirect():2446] Redirects installed.
+2025-11-05 17:46:46,646 INFO    MainThread:7916 [wandb_init.py:init():1073] run started, returning control to user process
+2025-11-05 17:46:46,647 INFO    MainThread:7916 [wandb_run.py:_tensorboard_callback():1598] tensorboard callback: runs/Pendulum-v1__ppo-run__1__1762361205, True
+2025-11-05 17:46:46,653 INFO    wandb-AsyncioManager-main:7916 [service_client.py:_forward_responses():80] Reached EOF.
+2025-11-05 17:46:46,653 INFO    wandb-AsyncioManager-main:7916 [mailbox.py:close():137] Closing mailbox, abandoning 2 handles.
+2025-11-05 17:46:51,018 ERROR   wandb-AsyncioManager-main:7916 [asyncio_manager.py:fn_wrap_exceptions():183] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/site-packages/wandb/sdk/lib/asyncio_manager.py", line 181, in fn_wrap_exceptions
+    await fn()
+  File "/opt/anaconda3/lib/python3.13/site-packages/wandb/sdk/lib/service/service_client.py", line 38, in publish
+    await self._send_server_request(request)
+  File "/opt/anaconda3/lib/python3.13/site-packages/wandb/sdk/lib/service/service_client.py", line 64, in _send_server_request
+    await self._writer.drain()
+  File "/opt/anaconda3/lib/python3.13/asyncio/streams.py", line 386, in drain
+    await self._protocol._drain_helper()
+  File "/opt/anaconda3/lib/python3.13/asyncio/streams.py", line 166, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2025-11-05 17:46:51,026 ERROR   wandb-AsyncioManager-main:7916 [asyncio_manager.py:fn_wrap_exceptions():183] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/site-packages/wandb/sdk/lib/asyncio_manager.py", line 181, in fn_wrap_exceptions
+    await fn()
+  File "/opt/anaconda3/lib/python3.13/site-packages/wandb/sdk/lib/service/service_client.py", line 38, in publish
+    await self._send_server_request(request)
+  File "/opt/anaconda3/lib/python3.13/site-packages/wandb/sdk/lib/service/service_client.py", line 64, in _send_server_request
+    await self._writer.drain()
+  File "/opt/anaconda3/lib/python3.13/asyncio/streams.py", line 386, in drain
+    await self._protocol._drain_helper()
+  File "/opt/anaconda3/lib/python3.13/asyncio/streams.py", line 166, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2025-11-05 17:46:51,027 ERROR   wandb-AsyncioManager-main:7916 [asyncio_manager.py:fn_wrap_exceptions():183] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/site-packages/wandb/sdk/lib/asyncio_manager.py", line 181, in fn_wrap_exceptions
+    await fn()
+  File "/opt/anaconda3/lib/python3.13/site-packages/wandb/sdk/lib/service/service_client.py", line 38, in publish
+    await self._send_server_request(request)
+  File "/opt/anaconda3/lib/python3.13/site-packages/wandb/sdk/lib/service/service_client.py", line 64, in _send_server_request
+    await self._writer.drain()
+  File "/opt/anaconda3/lib/python3.13/asyncio/streams.py", line 386, in drain
+    await self._protocol._drain_helper()
+  File "/opt/anaconda3/lib/python3.13/asyncio/streams.py", line 166, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2025-11-05 17:46:51,028 ERROR   wandb-AsyncioManager-main:7916 [asyncio_manager.py:fn_wrap_exceptions():183] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.13/site-packages/wandb/sdk/lib/asyncio_manager.py", line 181, in fn_wrap_exceptions
+    await fn()
+  File "/opt/anaconda3/lib/python3.13/site-packages/wandb/sdk/lib/service/service_client.py", line 38, in publish
+    await self._send_server_request(request)
+  File "/opt/anaconda3/lib/python3.13/site-packages/wandb/sdk/lib/service/service_client.py", line 64, in _send_server_request
+    await self._writer.drain()
+  File "/opt/anaconda3/lib/python3.13/asyncio/streams.py", line 386, in drain
+    await self._protocol._drain_helper()
+  File "/opt/anaconda3/lib/python3.13/asyncio/streams.py", line 166, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost

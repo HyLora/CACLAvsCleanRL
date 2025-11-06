@@ -1,0 +1,15 @@
+{"time":"2025-11-05T17:46:57.315584+01:00","level":"INFO","msg":"stream: starting","core version":"0.22.3"}
+{"time":"2025-11-05T17:46:57.570649+01:00","level":"INFO","msg":"stream: created new stream","id":"gjgcoot5"}
+{"time":"2025-11-05T17:46:57.570741+01:00","level":"INFO","msg":"handler: started","stream_id":"gjgcoot5"}
+{"time":"2025-11-05T17:46:57.570878+01:00","level":"INFO","msg":"stream: started","id":"gjgcoot5"}
+{"time":"2025-11-05T17:46:57.570896+01:00","level":"INFO","msg":"writer: started","stream_id":"gjgcoot5"}
+{"time":"2025-11-05T17:46:57.570913+01:00","level":"INFO","msg":"sender: started","stream_id":"gjgcoot5"}
+{"time":"2025-11-05T17:46:57.899391+01:00","level":"ERROR","msg":"git repo not found","error":"repository does not exist"}
+{"time":"2025-11-05T17:46:58.079622+01:00","level":"INFO","msg":"stream: closing","id":"gjgcoot5"}
+{"time":"2025-11-05T17:47:08.074425+01:00","level":"WARN","msg":"tensorboard: no root directory","error":"timed out after 10s"}
+{"time":"2025-11-05T17:47:08.075728+01:00","level":"INFO","msg":"tensorboard: tracking new log directory","rootDir":{},"logDir":"LocalOrCloudPath(LocalPath=\"/Users/hyloradotcom/Documents/ERAMSUS/KPISseminar/CACLA2/runs/Pendulum-v1__ppo-run__1__1762361216\")","namespace":""}
+{"time":"2025-11-05T17:47:08.079541+01:00","level":"INFO","msg":"tensorboard: saving file","fileLocation":"/Users/hyloradotcom/Documents/ERAMSUS/KPISseminar/CACLA2/runs/Pendulum-v1__ppo-run__1__1762361216/events.out.tfevents.1762361218.NAT-INSIDE-192-168-215-111.rrz.uni-hamburg.de.local.8180.0","runPath":"runs/Pendulum-v1__ppo-run__1__1762361216/events.out.tfevents.1762361218.NAT-INSIDE-192-168-215-111.rrz.uni-hamburg.de.local.8180.0"}
+{"time":"2025-11-05T17:47:08.944573+01:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-11-05T17:47:09.17756+01:00","level":"INFO","msg":"handler: closed","stream_id":"gjgcoot5"}
+{"time":"2025-11-05T17:47:09.177965+01:00","level":"INFO","msg":"sender: closed","stream_id":"gjgcoot5"}
+{"time":"2025-11-05T17:47:09.178028+01:00","level":"INFO","msg":"stream: closed","id":"gjgcoot5"}
