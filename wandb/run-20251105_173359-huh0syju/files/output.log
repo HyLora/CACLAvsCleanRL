@@ -1,5 +1,0 @@
-Traceback (most recent call last):
-  File "/Users/hyloradotcom/Documents/ERAMSUS/KPISseminar/CACLA2/sac_pendulum_cleanrl.py", line 207, in <module>
-    real_next_obs[idx] = infos["final_observation"][idx]
-                         ~~~~~^^^^^^^^^^^^^^^^^^^^^
-KeyError: 'final_observation'

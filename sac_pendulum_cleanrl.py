@@ -1,12 +1,13 @@
 # Source: https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/sac_continuous_action.py
-# This script is the official CleanRL SAC implementation, adapted to run on Pendulum-v1
-# directly for this benchmark comparison.
+# MODIFIED with Early Stopping and Bug Fix
 
 import os
 import random
 import time
 from dataclasses import dataclass
 import types
+# --- ADDED FOR EARLY STOPPING ---
+from collections import deque 
 
 import gymnasium as gym
 import numpy as np
@@ -16,7 +17,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
-import wandb # Added for benchmark
+import wandb 
 
 
 def make_env(env_id, seed, idx, capture_video, run_name):
@@ -95,7 +96,7 @@ class Actor(nn.Module):
 if __name__ == "__main__":
     # --- Hard-coded args for Pendulum benchmark ---
     args = types.SimpleNamespace()
-    args.exp_name = "sac-run"
+    args.exp_name = "sac-run-early-stop-FIXED" # <-- Changed run name
     args.seed = 1
     args.torch_deterministic = True
     args.cuda = True
@@ -104,7 +105,7 @@ if __name__ == "__main__":
     args.wandb_entity = None
     args.capture_video = False
     args.env_id = "Pendulum-v1"
-    args.total_timesteps = 200000 # ~2000 episodes
+    args.total_timesteps = 200000 
     args.buffer_size = int(1e6)
     args.gamma = 0.99
     args.tau = 0.005
@@ -113,9 +114,9 @@ if __name__ == "__main__":
     args.policy_lr = 3e-4
     args.q_lr = 1e-3
     args.policy_frequency = 2
-    args.target_network_frequency = 1 # Ws 2 in the paper, 1 in stable-baselines
-    args.noise_clip = 0.5 # Not used in SAC
-    args.alpha = 0.2 # Default alpha
+    args.target_network_frequency = 1 
+    args.noise_clip = 0.5 
+    args.alpha = 0.2 
     args.autotune = True
     # --- End hard-coded args ---
 
@@ -126,7 +127,7 @@ if __name__ == "__main__":
             entity=args.wandb_entity,
             sync_tensorboard=True,
             config=vars(args),
-            name=args.exp_name, # Use "sac-run" as the name
+            name=args.exp_name,
             monitor_gym=True,
             save_code=True,
         )
@@ -136,7 +137,14 @@ if __name__ == "__main__":
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # TRY NOT TO MODIFY: seeding
+    # --- ADDED: Early Stopping Parameters ---
+    TARGET_REWARD = -160.0
+    REWARD_WINDOW_SIZE = 20
+    reward_window = deque(maxlen=REWARD_WINDOW_SIZE)
+    print(f"--- SAC Early Stopping Enabled ---")
+    print(f"Will stop if avg reward over {REWARD_WINDOW_SIZE} episodes > {TARGET_REWARD}")
+    # --- END Early Stopping Params ---
+
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -144,7 +152,6 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    # env setup
     envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name)])
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
@@ -178,46 +185,50 @@ if __name__ == "__main__":
     )
     start_time = time.time()
 
-    # TRY NOT TO MODIFY: start the game
     obs, _ = envs.reset(seed=args.seed)
     for global_step in range(args.total_timesteps):
-        # ALGO LOGIC: put action logic here
         if global_step < args.learning_starts:
             actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
         else:
             actions, _, _ = actor.get_action(torch.Tensor(obs).to(device))
             actions = actions.detach().cpu().numpy()
 
-        # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminated, truncated, infos = envs.step(actions)
 
-        # TRY NOT TO MODIFY: record rewards for plotting purposes
         if "final_info" in infos:
             for info in infos["final_info"]:
                 if info and "episode" in info:
                     print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                    break
+                    writer.add_scalar("charts/episodic_return", info['episode']['r'], global_step)
+                    writer.add_scalar("charts/episodic_length", info['episode']['l'], global_step)
+                    
+                    # --- ADDED: Early Stopping Logic ---
+                    reward_window.append(info['episode']['r'])
+                    avg_reward = np.mean(reward_window)
+                    writer.add_scalar("charts/average_return", avg_reward, global_step)
+                    
+                    if len(reward_window) == REWARD_WINDOW_SIZE and avg_reward >= TARGET_REWARD:
+                        print(f"\n--- Stable result reached! ---")
+                        print(f"Average reward of {avg_reward:.2f} over {REWARD_WINDOW_SIZE} episodes.")
+                        print(f"Stopping SAC early at global_step {global_step}.")
+                        # This breaks the main 'for global_step...' loop
+                        break 
+            
+            # Check if the inner loop set the stop flag
+            if len(reward_window) == REWARD_WINDOW_SIZE and np.mean(reward_window) >= TARGET_REWARD:
+                break
+            # --- END Early Stopping Logic ---
 
-        # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         real_next_obs = next_obs.copy()
-
-        # Check if the 'final_info' key (from vectorized env) exists
         if "final_info" in infos:
-            # Iterate over the 'final_info' array (one entry per env)
             for idx, info in enumerate(infos["final_info"]):
-                # If info is not None and 'final_observation' is present
-                # (this is true only if truncated=True)
                 if info and "final_observation" in info:
                     real_next_obs[idx] = info["final_observation"]
 
         rb.add(obs, real_next_obs, actions, rewards, terminated, np.array([infos]))
         
-        # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
 
-        # ALGO LOGIC: training.
         if global_step > args.learning_starts:
             data = rb.sample(args.batch_size)
             with torch.no_grad():
@@ -237,7 +248,7 @@ if __name__ == "__main__":
             qf_loss.backward()
             q_optimizer.step()
 
-            if global_step % args.policy_frequency == 0:  # TD 3 Delayed Policy BUpdates
+            if global_step % args.policy_frequency == 0:
                 pi, log_pi, _ = actor.get_action(data.observations)
                 qf1_pi = qf1(data.observations, pi)
                 qf2_pi = qf2(data.observations, pi)
@@ -258,7 +269,6 @@ if __name__ == "__main__":
                     a_optimizer.step()
                     alpha = log_alpha.exp().item()
 
-            # update the target networks
             if global_step % args.target_network_frequency == 0:
                 for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
@@ -274,6 +284,7 @@ if __name__ == "__main__":
                 writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
                 writer.add_scalar("losses/alpha", alpha, global_step)
                 print("SPS:", int(global_step / (time.time() - start_time)))
+                # --- THIS IS THE FIX ---
                 writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
                 if args.autotune:
                     writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
