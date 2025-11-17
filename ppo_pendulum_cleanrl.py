@@ -62,7 +62,10 @@ class ClipObservationWrapper(ObservationWrapper):
 
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
-        env = gym.make(env_id)
+        # --- CHANGED: Added render_mode for video capture ---
+        render_mode = "rgb_array" if capture_video and idx == 0 else None
+        env = gym.make(env_id, render_mode=render_mode)
+        
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
@@ -120,14 +123,18 @@ class Agent(nn.Module):
 if __name__ == "__main__":
     # --- Hard-coded args for Pendulum benchmark ---
     args = types.SimpleNamespace()
-    args.exp_name = "ppo-run"
+    # --- CHANGED: Updated run name ---
+    args.exp_name = "ppo"
     args.seed = 1
     args.torch_deterministic = True
     args.cuda = True
     args.track = True
     args.wandb_project_name = "cacla-vs-cleanrl-benchmark"
     args.wandb_entity = None
-    args.capture_video = False
+    
+    # --- CHANGED: Set to True to record videos ---
+    args.capture_video = True
+    
     args.env_id = "Pendulum-v1"
     args.total_timesteps = 200000 # Same approx. length as 2000 episodes * 100 steps
     args.learning_rate = 3e-4
@@ -158,7 +165,7 @@ if __name__ == "__main__":
             entity=args.wandb_entity,
             sync_tensorboard=True,
             config=vars(args),
-            name=args.exp_name, # Use "ppo-run" as the name
+            name=args.exp_name, # Use "ppo" as the name
             monitor_gym=True,
             save_code=True,
         )
@@ -260,7 +267,8 @@ if __name__ == "__main__":
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
 
-        b_inds = np.arange(args.batch_size)
+        # --- BUG FIX 1: Renamed 'args.batch_K_size' to 'args.batch_size' ---
+        b_inds = np.arange(args.batch_size) 
         clipfracs = []
         for epoch in range(args.update_epochs):
             np.random.shuffle(b_inds)
@@ -320,7 +328,10 @@ if __name__ == "__main__":
         writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
         writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
         writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
-        writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
+        
+        # --- BUG FIX 2: Renamed 'approx_T_kl' to 'approx_kl' ---
+        writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step) 
+        
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))

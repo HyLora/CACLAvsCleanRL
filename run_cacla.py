@@ -4,6 +4,8 @@ import torch.nn as nn
 import numpy as np
 import wandb
 import time
+# --- ADDED: Import the video recorder wrapper ---
+import gym.wrappers
 
 # --- 1. Define the Models (Same as before) ---
 
@@ -68,9 +70,19 @@ class CriticModel(nn.Module):
 
 # --- 2. Main Training Function (Corrected Loop) ---
 def main():
-    wandb.init(project="cacla-vs-cleanrl-benchmark", name="cacla-run-200k")
+    # --- CHANGED: Updated run name ---
+    wandb.init(project="cacla-vs-cleanrl-benchmark", name="cacla")
     
-    env = gym.make("Pendulum-v1")
+    # --- CHANGED: Added render_mode="rgb_array" for video ---
+    env = gym.make("Pendulum-v1", render_mode="rgb_array")
+    
+    # --- ADDED: Wrap the env for video recording ---
+    # This will save a video every 50 episodes to a "videos/" folder
+    env = gym.wrappers.RecordVideo(
+        env, 
+        "videos/cacla-run", 
+        episode_trigger=lambda ep_num: ep_num % 50 == 0
+    )
     
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]

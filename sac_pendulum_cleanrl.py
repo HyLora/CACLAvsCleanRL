@@ -22,7 +22,10 @@ import wandb
 
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
-        env = gym.make(env_id)
+        # --- CHANGED: Added render_mode for video capture ---
+        render_mode = "rgb_array" if capture_video and idx == 0 else None
+        env = gym.make(env_id, render_mode=render_mode)
+        
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
@@ -96,14 +99,18 @@ class Actor(nn.Module):
 if __name__ == "__main__":
     # --- Hard-coded args for Pendulum benchmark ---
     args = types.SimpleNamespace()
-    args.exp_name = "sac-run-early-stop-FIXED" # <-- Changed run name
+    # --- CHANGED: Updated run name ---
+    args.exp_name = "sac" 
     args.seed = 1
     args.torch_deterministic = True
     args.cuda = True
     args.track = True
     args.wandb_project_name = "cacla-vs-cleanrl-benchmark"
     args.wandb_entity = None
-    args.capture_video = False
+    
+    # --- CHANGED: Set to True to record videos ---
+    args.capture_video = True
+    
     args.env_id = "Pendulum-v1"
     args.total_timesteps = 200000 
     args.buffer_size = int(1e6)
