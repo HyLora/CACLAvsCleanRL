@@ -1,341 +1,240 @@
-# Source: https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_continuous_action.py
-# This script is the official CleanRL PPO implementation, adapted to run on Pendulum-v1
-# directly for this benchmark comparison.
-
-import os
-import random
-import time
-from dataclasses import dataclass
-import types
-
 import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.normal import Normal
-from torch.utils.tensorboard import SummaryWriter
-import wandb # Added for benchmark
+import wandb 
+from gymnasium import ObservationWrapper
+import time
+from collections import deque
 
-# --- START: compatibility ClipObservationWrapper ---
-from gymnasium import ObservationWrapper, spaces
+# ================= CONFIGURATION =================
+ENV_ID = "Pendulum-v1"
+TOTAL_TIMESTEPS = 1_000_000 # PPO is "On-Policy" (less efficient), so it needs more steps than SAC
+NUM_STEPS = 2048            # How many steps to collect before stopping to learn (The "Rollout")
+TARGET_REWARD = -150.0      # Solved threshold
+REWARD_WINDOW = 20          # Stability window
 
+# ================= WRAPPERS =================
+# Reinforcement Learning is very sensitive to the scale of input numbers.
+# These wrappers ensure the Neural Network sees nice, normalized numbers (mean 0, std 1).
 def _clip_obs_recursive(obs, clip):
-    if isinstance(obs, np.ndarray):
-        return np.clip(obs, -clip, clip)
-    if isinstance(obs, (list, tuple)):
-        return type(obs)(_clip_obs_recursive(o, clip) for o in obs)
-    if isinstance(obs, dict):
-        return {k: _clip_obs_recursive(v, clip) for k, v in obs.items()}
-    return obs  # leave as is for other types
-
-def _clip_space_recursive(space, clip):
-    # return a new space with clipped bounds where applicable
-    if isinstance(space, spaces.Box):
-        low = np.maximum(space.low, -clip)
-        high = np.minimum(space.high, clip)
-        return spaces.Box(low=low, high=high, shape=space.shape, dtype=space.dtype)
-    if isinstance(space, spaces.Dict):
-        return spaces.Dict({k: _clip_space_recursive(s, clip) for k, s in space.spaces.items()})
-    if isinstance(space, spaces.Tuple):
-        return spaces.Tuple(tuple(_clip_space_recursive(s, clip) for s in space.spaces))
-    # fallback: return original
-    return space
+    if isinstance(obs, np.ndarray): return np.clip(obs, -clip, clip)
+    if isinstance(obs, (list, tuple)): return type(obs)(_clip_obs_recursive(o, clip) for o in obs)
+    if isinstance(obs, dict): return {k: _clip_obs_recursive(v, clip) for k, v in obs.items()}
+    return obs
 
 class ClipObservationWrapper(ObservationWrapper):
-    """
-    Clip observations elementwise to [-clip, clip]. Works for Box and nested Dict/Tuple/Lists.
-    Use instead of gymnasium.wrappers.ClipObservationWrapper if not available.
-    """
     def __init__(self, env, clip=10.0):
         super().__init__(env)
         self.clip = float(clip)
-        try:
-            self.observation_space = _clip_space_recursive(env.observation_space, self.clip)
-        except Exception:
-            # fallback: keep original space if manipulation fails
-            self.observation_space = env.observation_space
-
+        self.observation_space = env.observation_space 
     def observation(self, observation):
         return _clip_obs_recursive(observation, self.clip)
-# --- END: compatibility ClipObservationWrapper ---
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(env_id, seed):
     def thunk():
-        # --- CHANGED: Added render_mode for video capture ---
-        render_mode = "rgb_array" if capture_video and idx == 0 else None
-        env = gym.make(env_id, render_mode=render_mode)
-        
+        env = gym.make(env_id)
+        # Note: We track rewards manually in the loop, but these wrappers help the Agent learn.
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.NormalizeObservation(env)
-        # use local compatibility wrapper
         env = ClipObservationWrapper(env, 10.0)
         env = gym.wrappers.NormalizeReward(env)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-        env.action_space.seed(seed)
-        env.observation_space.seed(seed)
+        env.action_space.seed(seed); env.observation_space.seed(seed)
         return env
-
     return thunk
 
-
+# Orthogonal Initialization: A trick to help deep networks train faster.
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+# ================= AGENT (ACTOR-CRITIC) =================
 class Agent(nn.Module):
     def __init__(self, envs):
         super().__init__()
+        # CRITIC: Estimates Value V(s) --> "How good is this state?"
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)), 
+            nn.Tanh(), 
+            layer_init(nn.Linear(64, 64)), 
+            nn.Tanh(), 
+            layer_init(nn.Linear(64, 1), std=1.0)
         )
+        # ACTOR: Estimates the Mean (mu) of the action.
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, np.prod(envs.single_action_space.shape)), std=0.01),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)), 
+            nn.Tanh(), 
+            layer_init(nn.Linear(64, 64)), 
+            nn.Tanh(), 
+            layer_init(nn.Linear(64, np.prod(envs.single_action_space.shape)), std=0.01)
         )
+        # Learnable Log Standard Deviation. (Allows the agent to learn how much to explore).
         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
 
-    def get_value(self, x):
+    def get_value(self, x): 
         return self.critic(x)
 
     def get_action_and_value(self, x, action=None):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
+        
+        # Create a Normal (Gaussian) distribution
         probs = Normal(action_mean, action_std)
-        if action is None:
+        
+        # If we are playing, sample an action. If we are training, we pass the old action in to get its new probability.
+        if action is None: 
             action = probs.sample()
+            
+        # Return: Action, Log Probability (needed for PPO math), Entropy (randomness), Value
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
-
+# ================= MAIN LOOP =================
 if __name__ == "__main__":
-    # --- Hard-coded args for Pendulum benchmark ---
-    args = types.SimpleNamespace()
-    # --- CHANGED: Updated run name ---
-    args.exp_name = "ppo"
-    args.seed = 1
-    args.torch_deterministic = True
-    args.cuda = True
-    args.track = True
-    args.wandb_project_name = "cacla-vs-cleanrl-benchmark"
-    args.wandb_entity = None
-    
-    # --- CHANGED: Set to True to record videos ---
-    args.capture_video = True
-    
-    args.env_id = "Pendulum-v1"
-    args.total_timesteps = 200000 # Same approx. length as 2000 episodes * 100 steps
-    args.learning_rate = 3e-4
-    args.num_envs = 1
-    args.num_steps = 2048
-    args.anneal_lr = True
-    args.gae = True
-    args.gamma = 0.99
-    args.gae_lambda = 0.95
-    args.num_minibatches = 32
-    args.update_epochs = 10
-    args.norm_adv = True
-    args.clip_coef = 0.2
-    args.clip_vloss = True
-    args.ent_coef = 0.0
-    args.vf_coef = 0.5
-    args.max_grad_norm = 0.5
-    args.target_kl = None
-    # --- End hard-coded args ---
+    print("\n" + "="*50)
+    print("✅ STARTING PPO - VERSION 3 (FINAL FIX)")
+    print("="*50 + "\n")
 
-    args.batch_size = int(args.num_envs * args.num_steps)
-    args.minibatch_size = int(args.batch_size // args.num_minibatches)
-
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    if args.track:
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=args.exp_name, # Use "ppo" as the name
-            monitor_gym=True,
-            save_code=True,
-        )
-    writer = SummaryWriter(f"runs/{run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    wandb.init(
+        project="cacla-vs-cleanrl-benchmark", 
+        name="ppo-manual-track", 
+        monitor_gym=False,
+        settings=wandb.Settings(init_timeout=300)
     )
-
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = args.torch_deterministic
-
-    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
-    )
-    assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
-
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    envs = gym.vector.SyncVectorEnv([make_env(ENV_ID, 1)])
     agent = Agent(envs).to(device)
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+    optimizer = optim.Adam(agent.parameters(), lr=3e-4, eps=1e-5)
 
-    obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
-    actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
-    logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
-    rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
-    dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
-    values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    # STORAGE BUFFERS (PPO collects data, learns, then deletes it)
+    obs = torch.zeros((NUM_STEPS, 1) + envs.single_observation_space.shape).to(device)
+    actions = torch.zeros((NUM_STEPS, 1) + envs.single_action_space.shape).to(device)
+    logprobs = torch.zeros((NUM_STEPS, 1)).to(device)
+    rewards = torch.zeros((NUM_STEPS, 1)).to(device)
+    dones = torch.zeros((NUM_STEPS, 1)).to(device)
+    values = torch.zeros((NUM_STEPS, 1)).to(device)
 
     global_step = 0
-    start_time = time.time()
-    next_obs, _ = envs.reset(seed=args.seed)
+    episode_num = 0
+    
+    next_obs, _ = envs.reset(seed=1)
     next_obs = torch.Tensor(next_obs).to(device)
-    next_done = torch.zeros(args.num_envs).to(device)
-    num_updates = args.total_timesteps // args.batch_size
+    next_done = torch.zeros(1).to(device)
+    
+    num_updates = TOTAL_TIMESTEPS // NUM_STEPS
+    
+    current_ep_reward = 0
+    reward_window = deque(maxlen=REWARD_WINDOW)
+    start_time = time.time()
 
+    print(f"--- PPO STARTING ON {device} ---")
+
+    # === OUTER LOOP: EPISODES / UPDATES ===
     for update in range(1, num_updates + 1):
-        if args.anneal_lr:
-            frac = 1.0 - (update - 1.0) / num_updates
-            lrnow = frac * args.learning_rate
-            optimizer.param_groups[0]["lr"] = lrnow
+        # Learning Rate Annealing: Slowly lower LR as training progresses
+        frac = 1.0 - (update - 1.0) / num_updates
+        optimizer.param_groups[0]["lr"] = frac * 3e-4
 
-        for step in range(0, args.num_steps):
-            global_step += 1 * args.num_envs
-            obs[step] = next_obs
-            dones[step] = next_done
-
+        # === PHASE 1: DATA COLLECTION (ROLLOUT) ===
+        for step in range(0, NUM_STEPS):
+            global_step += 1
+            obs[step] = next_obs; dones[step] = next_done
+            
+            # 1. Get Action from Policy
             with torch.no_grad():
                 action, logprob, _, value = agent.get_action_and_value(next_obs)
                 values[step] = value.flatten()
-            actions[step] = action
-            logprobs[step] = logprob
-
-            next_obs, reward, terminated, truncated, infos = envs.step(action.cpu().numpy())
+            actions[step] = action; logprobs[step] = logprob
+            
+            # 2. Execute Step
+            real_next_obs, reward, terminated, truncated, infos = envs.step(action.cpu().numpy())
+            current_ep_reward += reward[0] 
+            
             done = np.logical_or(terminated, truncated)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
+            next_obs, next_done = torch.Tensor(real_next_obs).to(device), torch.Tensor(done).to(device)
 
-            if "final_info" in infos:
-                for info in infos["final_info"]:
-                    if info and "episode" in info:
-                        print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                        writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                        writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+            # 3. Logging & Solved Check
+            if done[0]: 
+                episode_num += 1
+                reward_window.append(current_ep_reward)
+                avg_reward = np.mean(reward_window)
+                print(f"Ep {episode_num}: Reward={current_ep_reward:.2f} | Avg={avg_reward:.2f} | Step={global_step}")
+                wandb.log({"episode": episode_num, "charts/episodic_return": current_ep_reward, "charts/average_return": avg_reward, "global_step": global_step})
+                current_ep_reward = 0 
+                
+                if len(reward_window) == REWARD_WINDOW and avg_reward >= TARGET_REWARD:
+                    print(f"\n🚀 PPO SOLVED! Time: {time.time() - start_time:.2f}s")
 
+        # === PHASE 2: CALCULATE ADVANTAGE (GAE) ===
+        # GAE (Generalized Advantage Estimation) is a smart way to calculate rewards.
+        # It balances "Short term actual reward" vs "Long term predicted value".
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
-            if args.gae:
-                advantages = torch.zeros_like(rewards).to(device)
-                lastgaelam = 0
-                for t in reversed(range(args.num_steps)):
-                    if t == args.num_steps - 1:
-                        nextnonterminal = 1.0 - next_done
-                        nextvalues = next_value
-                    else:
-                        nextnonterminal = 1.0 - dones[t + 1]
-                        nextvalues = values[t + 1]
-                    delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
-                    advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
-                returns = advantages + values
-            else:
-                returns = torch.zeros_like(rewards).to(device)
-                for t in reversed(range(args.num_steps)):
-                    if t == args.num_steps - 1:
-                        nextnonterminal = 1.0 - next_done
-                        next_return = next_value
-                    else:
-                        nextnonterminal = 1.0 - dones[t + 1]
-                        next_return = returns[t + 1]
-                    returns[t] = rewards[t] + args.gamma * nextnonterminal * next_return
-                advantages = returns - values
+            advantages = torch.zeros_like(rewards).to(device)
+            lastgaelam = 0
+            for t in reversed(range(NUM_STEPS)):
+                if t == NUM_STEPS - 1: nextnonterminal = 1.0 - next_done; nextvalues = next_value
+                else: nextnonterminal = 1.0 - dones[t + 1]; nextvalues = values[t + 1]
+                
+                # TD Error: (Reward + Value_Next) - Value_Current
+                delta = rewards[t] + 0.99 * nextvalues * nextnonterminal - values[t]
+                
+                # Recursive Magic: combines current error with previous error
+                advantages[t] = lastgaelam = delta + 0.99 * 0.95 * nextnonterminal * lastgaelam
+            returns = advantages + values
 
+        # Flatten the buffer (batch size = NUM_STEPS)
         b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
         b_logprobs = logprobs.reshape(-1)
         b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
         b_advantages = advantages.reshape(-1)
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
-
-        # --- BUG FIX 1: Renamed 'args.batch_K_size' to 'args.batch_size' ---
-        b_inds = np.arange(args.batch_size) 
-        clipfracs = []
-        for epoch in range(args.update_epochs):
+        b_inds = np.arange(NUM_STEPS)
+        
+        # === PHASE 3: OPTIMIZATION (LEARNING) ===
+        # We re-train on the data we just collected for 10 epochs
+        for epoch in range(10):
             np.random.shuffle(b_inds)
-            for start in range(0, args.batch_size, args.minibatch_size):
-                end = start + args.minibatch_size
-                mb_inds = b_inds[start:end]
-
+            for start in range(0, NUM_STEPS, 64):
+                end = start + 64; mb_inds = b_inds[start:end]
+                
+                # Re-evaluate the action using the *current* network
                 _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
+                
+                # Calculate Ratio (New Prob / Old Prob)
+                # We use logs because it's numerically safer: log(a/b) = log(a) - log(b)
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
-                with torch.no_grad():
-                    old_approx_kl = (-logratio).mean()
-                    approx_kl = ((ratio - 1) - logratio).mean()
-                    clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
-
+                # Normalize Advantages (Technical trick for stability)
                 mb_advantages = b_advantages[mb_inds]
-                if args.norm_adv:
-                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+                mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
 
+                # --- THE PPO CLIP LOSS (The core of PPO) --- 
+                # 1. Normal Loss: Advantage * Ratio
                 pg_loss1 = -mb_advantages * ratio
-                pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+                # 2. Clipped Loss: Advantage * Ratio (clipped to be close to 1, e.g., 0.8 to 1.2)
+                pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - 0.2, 1 + 0.2)
+                # Take the max (which is min because of negative sign) to be pessimistic/safe
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-                newvalue = newvalue.view(-1)
-                if args.clip_vloss:
-                    v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
-                    v_clipped = b_values[mb_inds] + torch.clamp(
-                        newvalue - b_values[mb_inds],
-                        -args.clip_coef,
-                        args.clip_coef,
-                    )
-                    v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
-                    v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                    v_loss = 0.5 * v_loss_max.mean()
-                else:
-                    v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+                # Value Loss: Train critic to predict better
+                v_loss = 0.5 * ((newvalue.view(-1) - b_returns[mb_inds]) ** 2).mean()
+                
+                # Entropy Loss: Bonus for randomness (prevents getting stuck early)
+                ent_loss = entropy.mean()
 
-                entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                # Total Loss
+                loss = pg_loss - 0.0 * ent_loss + v_loss * 0.5
 
-                optimizer.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
-                optimizer.step()
-
-            if args.target_kl is not None:
-                if approx_kl > args.target_kl:
-                    break
-
-        y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
-        var_y = np.var(y_true)
-        explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
-
-        writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
-        writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-        writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
-        writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-        writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
+                optimizer.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(agent.parameters(), 0.5); optimizer.step()
         
-        # --- BUG FIX 2: Renamed 'approx_T_kl' to 'approx_kl' ---
-        writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step) 
-        
-        writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-        writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        print("SPS:", int(global_step / (time.time() - start_time)))
-        writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
-
-    envs.close()
-    writer.close()
+        print(f"🔄 PPO Update Complete (Step {global_step})")

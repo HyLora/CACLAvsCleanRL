@@ -1,300 +1,293 @@
-# Source: https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/sac_continuous_action.py
-# MODIFIED with Early Stopping and Bug Fix
-
-import os
-import random
-import time
-from dataclasses import dataclass
-import types
-# --- ADDED FOR EARLY STOPPING ---
-from collections import deque 
-
 import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-from stable_baselines3.common.buffers import ReplayBuffer
-from torch.utils.tensorboard import SummaryWriter
-import wandb 
+import wandb
+import random
+import time
+from collections import deque
 
+# ================= CONFIGURATION =================
+# These hyperparameters control how the AI learns.
+ENV_ID = "Pendulum-v1"
+TOTAL_STEPS = 200_000       # Total frames to interact with the environment
+BUFFER_SIZE = 1_000_000     # SAC is "Off-Policy", so it needs a large memory to store past experiences
+BATCH_SIZE = 256            # How many experiences to learn from at once
+GAMMA = 0.99                # Discount factor: How much we care about future rewards vs immediate ones
+TAU = 0.005                 # Soft Update rate: How fast the "Target" networks copy the main networks
+LR = 3e-4                   # Learning Rate: How big of a step to take during Gradient Descent
+ALPHA = 0.2                 # Entropy Coefficient: The "Temperature". High = Explore more (Random), Low = Exploit more (Greedy)
+START_STEPS = 5000          # Steps to take completely randomly at the start to fill the buffer
+POLICY_DELAY = 2            # Update the Actor less frequently than the Critic for stability
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def make_env(env_id, seed, idx, capture_video, run_name):
-    def thunk():
-        # --- CHANGED: Added render_mode for video capture ---
-        render_mode = "rgb_array" if capture_video and idx == 0 else None
-        env = gym.make(env_id, render_mode=render_mode)
-        
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env.action_space.seed(seed)
-        env.observation_space.seed(seed)
-        return env
+# --- SOLVED CRITERIA ---
+TARGET_REWARD = -150.0   # If average reward > -150, we consider the pendulum "balanced"
+REWARD_WINDOW = 20       # We need to maintain this score for 20 consecutive episodes
 
-    return thunk
+# ================= W&B INIT =================
+# Initialize Weights & Biases for live graphing
+wandb.init(
+    project="cacla-vs-cleanrl-benchmark",
+    name="sac-explained",
+    config={
+        "env": ENV_ID,
+        "total_steps": TOTAL_STEPS,
+        "batch_size": BATCH_SIZE,
+        "gamma": GAMMA,
+        "lr": LR,
+        "alpha": ALPHA
+    },
+    settings=wandb.Settings(init_timeout=300)
+)
 
-# ALGO LOGIC: initialize agent here:
-class SoftQNetwork(nn.Module):
-    def __init__(self, envs):
-        super().__init__()
-        self.fc1 = nn.Linear(np.array(envs.single_observation_space.shape).prod() + np.prod(envs.single_action_space.shape), 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 1)
+# ================= REPLAY BUFFER =================
+# Stores transitions (State, Action, Reward, Next_State, Done).
+# Since SAC is Off-Policy, it can learn from data collected minutes or hours ago.
+class ReplayBuffer:
+    def __init__(self, size):
+        self.buffer = deque(maxlen=size)
 
-    def forward(self, x, a):
-        x = torch.cat([x, a], 1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+    def add(self, state, action, reward, next_state, done):
+        self.buffer.append((state, action, reward, next_state, done))
 
+    def sample(self, batch_size):
+        # Randomly pick a batch of experiences
+        batch = random.sample(self.buffer, batch_size)
+        state, action, reward, next_state, done = map(np.array, zip(*batch))
+        return state, action, reward, next_state, done
 
-LOG_STD_MAX = 2
-LOG_STD_MIN = -5
+    def __len__(self):
+        return len(self.buffer)
 
+# ================= NETWORKS =================
 
+# --- The Actor (Policy Network) ---
+# Goal: Output the best action (mean) and how uncertain it is (std) for a given state.
 class Actor(nn.Module):
-    def __init__(self, envs):
+    def __init__(self, state_dim, action_dim, max_action):
         super().__init__()
-        self.fc1 = nn.Linear(np.array(envs.single_observation_space.shape).prod(), 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc_mean = nn.Linear(256, np.prod(envs.single_action_space.shape))
-        self.fc_logstd = nn.Linear(256, np.prod(envs.single_action_space.shape))
-        # action rescaling
-        self.register_buffer(
-            "action_scale", torch.tensor((envs.single_action_space.high - envs.single_action_space.low) / 2.0, dtype=torch.float32)
+        self.max_action = max_action
+        
+        # Shared feature extractor
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU()
         )
-        self.register_buffer(
-            "action_bias", torch.tensor((envs.single_action_space.high + envs.single_action_space.low) / 2.0, dtype=torch.float32)
-        )
+        
+        # Output 1: The Mean action (mu)
+        self.mean = nn.Linear(256, action_dim)
+        # Output 2: The Log Standard Deviation (sigma). We predict log(std) for numerical stability.
+        self.log_std = nn.Linear(256, action_dim)
 
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        mean = self.fc_mean(x)
-        log_std = self.fc_logstd(x)
-        log_std = torch.tanh(log_std)
-        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (log_std + 1)  # Tanh in nn.Linear constructor
-
+    def forward(self, state):
+        x = self.net(state)
+        mean = self.mean(x)
+        # Clamp log_std to prevent the distribution from becoming too narrow (collapse) or too wide (instability)
+        log_std = torch.clamp(self.log_std(x), -20, 2)
         return mean, log_std
 
-    def get_action(self, x):
-        mean, log_std = self(x)
+    def sample(self, state):
+        mean, log_std = self(state)
         std = log_std.exp()
-        normal = torch.distributions.Normal(mean, std)
-        x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
-        y_t = torch.tanh(x_t)
-        action = y_t * self.action_scale + self.action_bias
-        log_prob = normal.log_prob(x_t)
-        # Enforcing Action Bound
-        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
-        log_prob = log_prob.sum(1, keepdim=True)
-        mean = torch.tanh(mean) * self.action_scale + self.action_bias
-        return action, log_prob, mean
-
-
-if __name__ == "__main__":
-    # --- Hard-coded args for Pendulum benchmark ---
-    args = types.SimpleNamespace()
-    # --- CHANGED: Updated run name ---
-    args.exp_name = "sac" 
-    args.seed = 1
-    args.torch_deterministic = True
-    args.cuda = True
-    args.track = True
-    args.wandb_project_name = "cacla-vs-cleanrl-benchmark"
-    args.wandb_entity = None
-    
-    # --- CHANGED: Set to True to record videos ---
-    args.capture_video = True
-    
-    args.env_id = "Pendulum-v1"
-    args.total_timesteps = 200000 
-    args.buffer_size = int(1e6)
-    args.gamma = 0.99
-    args.tau = 0.005
-    args.batch_size = 256
-    args.learning_starts = 5e3
-    args.policy_lr = 3e-4
-    args.q_lr = 1e-3
-    args.policy_frequency = 2
-    args.target_network_frequency = 1 
-    args.noise_clip = 0.5 
-    args.alpha = 0.2 
-    args.autotune = True
-    # --- End hard-coded args ---
-
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    if args.track:
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=args.exp_name,
-            monitor_gym=True,
-            save_code=True,
-        )
-    writer = SummaryWriter(f"runs/{run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
-
-    # --- ADDED: Early Stopping Parameters ---
-    TARGET_REWARD = -160.0
-    REWARD_WINDOW_SIZE = 20
-    reward_window = deque(maxlen=REWARD_WINDOW_SIZE)
-    print(f"--- SAC Early Stopping Enabled ---")
-    print(f"Will stop if avg reward over {REWARD_WINDOW_SIZE} episodes > {TARGET_REWARD}")
-    # --- END Early Stopping Params ---
-
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = args.torch_deterministic
-
-    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-
-    envs = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name)])
-    assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
-
-    max_action = float(envs.single_action_space.high[0])
-
-    actor = Actor(envs).to(device)
-    qf1 = SoftQNetwork(envs).to(device)
-    qf2 = SoftQNetwork(envs).to(device)
-    qf1_target = SoftQNetwork(envs).to(device)
-    qf2_target = SoftQNetwork(envs).to(device)
-    qf1_target.load_state_dict(qf1.state_dict())
-    qf2_target.load_state_dict(qf2.state_dict())
-    q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
-    actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
-
-    if args.autotune:
-        target_entropy = -torch.prod(torch.Tensor(envs.single_action_space.shape).to(device)).item()
-        log_alpha = torch.zeros(1, requires_grad=True, device=device)
-        alpha = log_alpha.exp().item()
-        a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
-    else:
-        alpha = args.alpha
-
-    envs.single_observation_space.dtype = np.float32
-    rb = ReplayBuffer(
-        args.buffer_size,
-        envs.single_observation_space,
-        envs.single_action_space,
-        device,
-        handle_timeout_termination=True,
-    )
-    start_time = time.time()
-
-    obs, _ = envs.reset(seed=args.seed)
-    for global_step in range(args.total_timesteps):
-        if global_step < args.learning_starts:
-            actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
-        else:
-            actions, _, _ = actor.get_action(torch.Tensor(obs).to(device))
-            actions = actions.detach().cpu().numpy()
-
-        next_obs, rewards, terminated, truncated, infos = envs.step(actions)
-
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if info and "episode" in info:
-                    print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", info['episode']['r'], global_step)
-                    writer.add_scalar("charts/episodic_length", info['episode']['l'], global_step)
-                    
-                    # --- ADDED: Early Stopping Logic ---
-                    reward_window.append(info['episode']['r'])
-                    avg_reward = np.mean(reward_window)
-                    writer.add_scalar("charts/average_return", avg_reward, global_step)
-                    
-                    if len(reward_window) == REWARD_WINDOW_SIZE and avg_reward >= TARGET_REWARD:
-                        print(f"\n--- Stable result reached! ---")
-                        print(f"Average reward of {avg_reward:.2f} over {REWARD_WINDOW_SIZE} episodes.")
-                        print(f"Stopping SAC early at global_step {global_step}.")
-                        # This breaks the main 'for global_step...' loop
-                        break 
-            
-            # Check if the inner loop set the stop flag
-            if len(reward_window) == REWARD_WINDOW_SIZE and np.mean(reward_window) >= TARGET_REWARD:
-                break
-            # --- END Early Stopping Logic ---
-
-        real_next_obs = next_obs.copy()
-        if "final_info" in infos:
-            for idx, info in enumerate(infos["final_info"]):
-                if info and "final_observation" in info:
-                    real_next_obs[idx] = info["final_observation"]
-
-        rb.add(obs, real_next_obs, actions, rewards, terminated, np.array([infos]))
         
-        obs = next_obs
+        # Create a Normal (Gaussian) distribution
+        normal = torch.distributions.Normal(mean, std)
+        
+        # Reparameterization Trick (rsample):
+        # Allows gradients to flow through the stochastic sampling process.
+        # Ideally: action = mean + std * noise
+        x_t = normal.rsample()
+        
+        # Tanh Squashing:
+        # Neural networks output values from -inf to +inf.
+        # Physical robots/simulations have limits (e.g., -2 to +2).
+        # Tanh forces the output to be between -1 and 1.
+        y_t = torch.tanh(x_t)
+        
+        # Scale to environment limits (Pendulum is -2 to 2)
+        action = y_t * self.max_action
+        
+        # Log Probability Correction:
+        # When we squash a Gaussian with Tanh, the probability density changes.
+        # We must subtract a correction term to get the true log_prob of the squashed action.
+        log_prob = normal.log_prob(x_t)
+        log_prob -= torch.log(self.max_action * (1 - y_t.pow(2)) + 1e-6)
+        
+        # Sum log_probs across action dimensions (if action_dim > 1)
+        return action, log_prob.sum(-1, keepdim=True)
 
-        if global_step > args.learning_starts:
-            data = rb.sample(args.batch_size)
-            with torch.no_grad():
-                next_state_actions, next_state_log_pi, _ = actor.get_action(data.next_observations)
-                qf1_next_target = qf1_target(data.next_observations, next_state_actions)
-                qf2_next_target = qf2_target(data.next_observations, next_state_actions)
-                min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - alpha * next_state_log_pi
-                next_q_value = data.rewards.flatten() + (1.0 - data.dones.flatten()) * args.gamma * (min_qf_next_target).view(-1)
+# --- The Critic (Q-Network) ---
+# Goal: Estimate "How good is this State-Action pair?"
+# SAC uses "Double Q-Learning" (Two Critics) to prevent overestimating values.
+class Critic(nn.Module):
+    def __init__(self, state_dim, action_dim):
+        super().__init__()
+        
+        # Critic 1
+        self.q1 = nn.Sequential(
+            nn.Linear(state_dim + action_dim, 256),
+            nn.ReLU(), nn.Linear(256, 256), nn.ReLU(), nn.Linear(256, 1)
+        )
+        
+        # Critic 2
+        self.q2 = nn.Sequential(
+            nn.Linear(state_dim + action_dim, 256),
+            nn.ReLU(), nn.Linear(256, 256), nn.ReLU(), nn.Linear(256, 1)
+        )
 
-            qf1_a_values = qf1(data.observations, data.actions).view(-1)
-            qf2_a_values = qf2(data.observations, data.actions).view(-1)
-            qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-            qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-            qf_loss = (qf1_loss + qf2_loss) / 2
+    def forward(self, state, action):
+        # Concatenate State and Action because Q(s, a) depends on both
+        sa = torch.cat([state, action], dim=1)
+        return self.q1(sa), self.q2(sa)
 
-            q_optimizer.zero_grad()
-            qf_loss.backward()
-            q_optimizer.step()
+# ================= MAIN TRAINING LOOP =================
+env = gym.make(ENV_ID)
+state_dim = env.observation_space.shape[0]
+action_dim = env.action_space.shape[0]
+max_action = float(env.action_space.high[0]) # Pendulum max_action is 2.0
 
-            if global_step % args.policy_frequency == 0:
-                pi, log_pi, _ = actor.get_action(data.observations)
-                qf1_pi = qf1(data.observations, pi)
-                qf2_pi = qf2(data.observations, pi)
-                min_qf_pi = torch.min(qf1_pi, qf2_pi)
-                actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
+# Initialize Models
+actor = Actor(state_dim, action_dim, max_action).to(DEVICE)
+critic = Critic(state_dim, action_dim).to(DEVICE)
 
-                actor_optimizer.zero_grad()
-                actor_loss.backward()
-                actor_optimizer.step()
+# Target Critic: A stable copy of the critic used to calculate future targets.
+# This stops the "moving target" problem in recursive learning.
+target_critic = Critic(state_dim, action_dim).to(DEVICE)
+target_critic.load_state_dict(critic.state_dict())
 
-                if args.autotune:
-                    with torch.no_grad():
-                        _, log_pi, _ = actor.get_action(data.observations)
-                    alpha_loss = (-log_alpha * (log_pi + target_entropy)).mean()
+actor_opt = optim.Adam(actor.parameters(), lr=LR)
+critic_opt = optim.Adam(critic.parameters(), lr=LR)
 
-                    a_optimizer.zero_grad()
-                    alpha_loss.backward()
-                    a_optimizer.step()
-                    alpha = log_alpha.exp().item()
+buffer = ReplayBuffer(BUFFER_SIZE)
 
-            if global_step % args.target_network_frequency == 0:
-                for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+# Tracking variables
+state, _ = env.reset()
+episode_reward = 0
+episode_num = 0
+global_step = 0
+reward_history = deque(maxlen=REWARD_WINDOW)
+start_time = time.time()
 
-            if global_step % 100 == 0:
-                writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
-                writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
-                writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
-                writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
-                writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
-                writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
-                writer.add_scalar("losses/alpha", alpha, global_step)
-                print("SPS:", int(global_step / (time.time() - start_time)))
-                # --- THIS IS THE FIX ---
-                writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
-                if args.autotune:
-                    writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
+print(f"--- SAC Started on {DEVICE} ---")
+print(f"Goal: Average reward > {TARGET_REWARD} over {REWARD_WINDOW} episodes")
 
-    envs.close()
-    writer.close()
+# === THE LOOP ===
+for step in range(TOTAL_STEPS):
+    global_step += 1
+
+    # 1. Action Selection
+    if step < START_STEPS:
+        # Warmup Phase: Take purely random actions to fill buffer with diverse data
+        action = env.action_space.sample()
+    else:
+        # Training Phase: Use the Actor to select actions
+        state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(DEVICE)
+        with torch.no_grad():
+            action, _ = actor.sample(state_tensor)
+        action = action.cpu().numpy()[0] # Convert back to numpy for Gym
+
+    # 2. Environment Step
+    next_state, reward, done, truncated, _ = env.step(action)
+    
+    # 3. Store in Buffer
+    buffer.add(state, action, reward, next_state, done)
+    state = next_state
+    episode_reward += reward
+
+    # 4. Handle Episode End
+    if done or truncated:
+        episode_num += 1
+        reward_history.append(episode_reward)
+        avg_reward = np.mean(reward_history)
+
+        # Log to WandB
+        wandb.log({
+            "episode": episode_num,
+            "charts/episodic_return": episode_reward,
+            "charts/average_return": avg_reward,
+            "global_step": global_step
+        })
+        
+        print(f"Ep {episode_num}: Reward={episode_reward:.2f} | Avg={avg_reward:.2f} | Step={global_step}")
+
+        # Check for Solution
+        if len(reward_history) == REWARD_WINDOW and avg_reward >= TARGET_REWARD:
+            elapsed_time = time.time() - start_time
+            print("\n" + "="*40)
+            print(f"🚀 ENVIRONMENT SOLVED!")
+            print(f"🏆 Episodes: {episode_num}")
+            print(f"⏱️ Time Taken: {elapsed_time:.2f} seconds")
+            print(f"📈 Avg Reward: {avg_reward:.2f}")
+            print("="*40 + "\n")
+            # exit(0) # Uncomment to stop training when solved
+
+        state, _ = env.reset()
+        episode_reward = 0
+
+    # 5. Training Step (Only if buffer has enough data)
+    if len(buffer) > BATCH_SIZE:
+        # Retrieve a batch of data
+        s, a, r, s2, d = buffer.sample(BATCH_SIZE)
+        
+        # Convert to PyTorch tensors
+        s = torch.tensor(s, dtype=torch.float32).to(DEVICE)
+        a = torch.tensor(a, dtype=torch.float32).to(DEVICE)
+        r = torch.tensor(r, dtype=torch.float32).unsqueeze(1).to(DEVICE)
+        s2 = torch.tensor(s2, dtype=torch.float32).to(DEVICE)
+        d = torch.tensor(d, dtype=torch.float32).unsqueeze(1).to(DEVICE)
+
+        # --- A. Update Critic ---
+        with torch.no_grad():
+            # Get next action from Actor for the NEXT state
+            next_action, next_log_prob = actor.sample(s2)
+            
+            # Get Q-values from Target Critics
+            q1_next, q2_next = target_critic(s2, next_action)
+            
+            # Take the minimum Q-value (prevents overestimation bias)
+            min_q_next = torch.min(q1_next, q2_next)
+            
+            # ENTROPY TERM: Subtract (alpha * log_prob). 
+            # This rewards the agent for exploring (high entropy/randomness) alongside getting high rewards.
+            target_q = r + (1 - d) * GAMMA * (min_q_next - ALPHA * next_log_prob)
+
+        # Get current Q-values
+        q1, q2 = critic(s, a)
+        
+        # Calculate Loss (MSE) for both critics
+        critic_loss = nn.MSELoss()(q1, target_q) + nn.MSELoss()(q2, target_q)
+
+        # Optimize Critic
+        critic_opt.zero_grad()
+        critic_loss.backward()
+        critic_opt.step()
+
+        # --- B. Update Actor (Delayed) ---
+        # We update the actor less frequently than the critic (e.g., every 2 steps)
+        # This gives the Critic time to stabilize before the Actor tries to exploit it.
+        if global_step % POLICY_DELAY == 0:
+            # We want to Maximize (Q - alpha * log_prob)
+            # Since optimizers minimize loss, we take the negative: -(Q - alpha * log_prob)
+            
+            new_action, log_prob = actor.sample(s)
+            q1_new, q2_new = critic(s, new_action)
+            q_new = torch.min(q1_new, q2_new)
+            
+            actor_loss = (ALPHA * log_prob - q_new).mean()
+
+            actor_opt.zero_grad()
+            actor_loss.backward()
+            actor_opt.step()
+
+            # --- C. Soft Update Target Networks ---
+            # Slowly move Target Network weights towards Main Network weights
+            # theta_target = tau * theta_main + (1 - tau) * theta_target
+            for param, target_param in zip(critic.parameters(), target_critic.parameters()):
+                target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
+
+print("Training finished.")
+env.close()
