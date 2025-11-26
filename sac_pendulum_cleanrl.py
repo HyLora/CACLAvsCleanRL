@@ -223,7 +223,7 @@ for step in range(TOTAL_STEPS):
             print(f"⏱️ Time Taken: {elapsed_time:.2f} seconds")
             print(f"📈 Avg Reward: {avg_reward:.2f}")
             print("="*40 + "\n")
-            # exit(0) # Uncomment to stop training when solved
+            exit(0) # Uncomment to stop training when solved
 
         state, _ = env.reset()
         episode_reward = 0

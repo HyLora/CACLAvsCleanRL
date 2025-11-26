@@ -171,6 +171,7 @@ if __name__ == "__main__":
                 
                 if len(reward_window) == REWARD_WINDOW and avg_reward >= TARGET_REWARD:
                     print(f"\n🚀 PPO SOLVED! Time: {time.time() - start_time:.2f}s")
+                    exit(0)
 
         # === PHASE 2: CALCULATE ADVANTAGE (GAE) ===
         # GAE (Generalized Advantage Estimation) is a smart way to calculate rewards.
