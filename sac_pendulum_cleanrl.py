@@ -214,16 +214,19 @@ for step in range(TOTAL_STEPS):
         
         print(f"Ep {episode_num}: Reward={episode_reward:.2f} | Avg={avg_reward:.2f} | Step={global_step}")
 
-        # Check for Solution
-        if len(reward_history) == REWARD_WINDOW and avg_reward >= TARGET_REWARD:
-            elapsed_time = time.time() - start_time
-            print("\n" + "="*40)
-            print(f"🚀 ENVIRONMENT SOLVED!")
-            print(f"🏆 Episodes: {episode_num}")
-            print(f"⏱️ Time Taken: {elapsed_time:.2f} seconds")
-            print(f"📈 Avg Reward: {avg_reward:.2f}")
-            print("="*40 + "\n")
-            exit(0) # Uncomment to stop training when solved
+        first = True 
+        if first:
+            # Check for Solution
+            if len(reward_history) == REWARD_WINDOW and avg_reward >= TARGET_REWARD:
+                elapsed_time = time.time() - start_time
+                print("\n" + "="*40)
+                print(f"🚀 SAC: ENVIRONMENT SOLVED!")
+                print(f"🏆 Episodes: {episode_num}")
+                print(f"⏱️ Time Taken: {elapsed_time:.2f} seconds")
+                print(f"📈 Avg Reward: {avg_reward:.2f}")
+                print("="*40 + "\n")
+                #exit(0) # Uncomment to stop training when solved
+                first = False
 
         state, _ = env.reset()
         episode_reward = 0

@@ -169,9 +169,12 @@ if __name__ == "__main__":
                 wandb.log({"episode": episode_num, "charts/episodic_return": current_ep_reward, "charts/average_return": avg_reward, "global_step": global_step})
                 current_ep_reward = 0 
                 
-                if len(reward_window) == REWARD_WINDOW and avg_reward >= TARGET_REWARD:
-                    print(f"\n🚀 PPO SOLVED! Time: {time.time() - start_time:.2f}s")
-                    exit(0)
+                first = True 
+                if first:
+                    if len(reward_window) == REWARD_WINDOW and avg_reward >= TARGET_REWARD:
+                        print(f"\n🚀 PPO SOLVED! Time: {time.time() - start_time:.2f}s")
+                        #exit(0)
+                        first = False
 
         # === PHASE 2: CALCULATE ADVANTAGE (GAE) ===
         # GAE (Generalized Advantage Estimation) is a smart way to calculate rewards.
