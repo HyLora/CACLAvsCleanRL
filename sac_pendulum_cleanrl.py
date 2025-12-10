@@ -30,7 +30,7 @@ REWARD_WINDOW = 20       # We need to maintain this score for 20 consecutive epi
 # Initialize Weights & Biases for live graphing
 wandb.init(
     project="cacla-vs-cleanrl-benchmark",
-    name="sac-explained",
+    name="sac",
     config={
         "env": ENV_ID,
         "total_steps": TOTAL_STEPS,
@@ -145,7 +145,20 @@ class Critic(nn.Module):
         return self.q1(sa), self.q2(sa)
 
 # ================= MAIN TRAINING LOOP =================
-env = gym.make(ENV_ID)
+# ================= MAIN TRAINING LOOP =================
+# 1. Add render_mode="rgb_array" here
+env = gym.make(ENV_ID, render_mode="rgb_array")
+
+# 2. Add the video recorder wrapper here
+env = gym.wrappers.RecordVideo(
+    env, 
+    video_folder=f"videos/{ENV_ID}/sac", 
+    episode_trigger=lambda x: x % 50 == 0,
+    disable_logger=True
+)
+
+state_dim = env.observation_space.shape[0]
+action_dim = env.action_space.shape[0]
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.shape[0]
 max_action = float(env.action_space.high[0]) # Pendulum max_action is 2.0
@@ -225,8 +238,8 @@ for step in range(TOTAL_STEPS):
                 print(f"⏱️ Time Taken: {elapsed_time:.2f} seconds")
                 print(f"📈 Avg Reward: {avg_reward:.2f}")
                 print("="*40 + "\n")
-                #exit(0) # Uncomment to stop training when solved
                 first = False
+                exit(0) # Uncomment to stop training when solved
 
         state, _ = env.reset()
         episode_reward = 0

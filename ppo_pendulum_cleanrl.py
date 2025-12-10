@@ -35,7 +35,16 @@ class ClipObservationWrapper(ObservationWrapper):
 
 def make_env(env_id, seed):
     def thunk():
-        env = gym.make(env_id)
+        # Ensure this line is present
+        env = gym.make(env_id, render_mode="rgb_array")
+        
+        # Ensure this wrapper is present
+        env = gym.wrappers.RecordVideo(
+            env, 
+            video_folder=f"videos/{env_id}/ppo", 
+            episode_trigger=lambda x: x % 50 == 0,
+            disable_logger=True
+        )
         # Note: We track rewards manually in the loop, but these wrappers help the Agent learn.
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.ClipAction(env)
@@ -102,7 +111,7 @@ if __name__ == "__main__":
 
     wandb.init(
         project="cacla-vs-cleanrl-benchmark", 
-        name="ppo-manual-track", 
+        name="ppo", 
         monitor_gym=False,
         settings=wandb.Settings(init_timeout=300)
     )
@@ -132,6 +141,7 @@ if __name__ == "__main__":
     current_ep_reward = 0
     reward_window = deque(maxlen=REWARD_WINDOW)
     start_time = time.time()
+    first = True 
 
     print(f"--- PPO STARTING ON {device} ---")
 
@@ -163,19 +173,31 @@ if __name__ == "__main__":
             # 3. Logging & Solved Check
             if done[0]: 
                 episode_num += 1
-                reward_window.append(current_ep_reward)
+                raw_reward = 0
+                if "final_info" in infos:
+                    for info in infos["final_info"]:
+                        if info and "episode" in info:
+                            raw_reward = info["episode"]["r"]
+                            # 'r' is the raw cumulative reward, 'l' is the length
+                            break 
+                
+                # Update the window with the REAL raw reward, not the normalized one
+                reward_window.append(raw_reward)
                 avg_reward = np.mean(reward_window)
-                print(f"Ep {episode_num}: Reward={current_ep_reward:.2f} | Avg={avg_reward:.2f} | Step={global_step}")
-                wandb.log({"episode": episode_num, "charts/episodic_return": current_ep_reward, "charts/average_return": avg_reward, "global_step": global_step})
+                
+                print(f"Ep {episode_num}: Raw Reward={raw_reward:.2f} | Avg={avg_reward:.2f} | Step={global_step}")
+                wandb.log({"episode": episode_num, "charts/episodic_return": raw_reward, "charts/average_return": avg_reward, "global_step": global_step})
+                
+                # Reset the normalized tracker for the next episode
                 current_ep_reward = 0 
                 
-                first = True 
+                # Check using the RAW data
                 if first:
                     if len(reward_window) == REWARD_WINDOW and avg_reward >= TARGET_REWARD:
                         print(f"\n🚀 PPO SOLVED! Time: {time.time() - start_time:.2f}s")
-                        #exit(0)
                         first = False
-
+                        exit(0)
+                        
         # === PHASE 2: CALCULATE ADVANTAGE (GAE) ===
         # GAE (Generalized Advantage Estimation) is a smart way to calculate rewards.
         # It balances "Short term actual reward" vs "Long term predicted value".
