@@ -88,7 +88,7 @@ def main():
         settings=wandb.Settings(init_timeout=300)
     )
     
-    # === MODIFICATION START: RecordVideo Wrapper ===
+    # === RecordVideo Wrapper ===
     env = gym.make("Pendulum-v1", render_mode="rgb_array")
     
     # Save video to 'videos/cacla' every 10 episodes
@@ -97,9 +97,7 @@ def main():
         video_folder="videos/cacla", 
         episode_trigger=lambda x: x % 10 == 0,
         disable_logger=True
-    )
-    # === MODIFICATION END ===
-    
+    )    
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     max_action = float(env.action_space.high[0])
